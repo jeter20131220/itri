@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --color-main: #345678;
+  --color-sub: #ea5413;
+  --color-main2: #a52c25;
+  
+}
+
+* {
+  font-family: "Noto Sans TC", sans-serif;
+  letter-spacing: 1px;
+}
