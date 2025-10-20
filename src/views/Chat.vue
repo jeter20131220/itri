@@ -1,8 +1,12 @@
 <script setup>
-import { ref, nextTick, computed, onMounted, watch } from "vue";
+import { ref, nextTick, computed, onMounted, watch, onBeforeUnmount, onUnmounted } from "vue";
+import { useRoute } from 'vue-router'
 import "animate.css";
 import axios from "axios";
 import { v4 as uuidv4 } from 'uuid'
+import Swal from "sweetalert2"
+
+const route = useRoute()
 
 function generateChatId() {
   console.log(`chat_${Date.now()}_${uuidv4()}`)
@@ -13,6 +17,9 @@ function generateChatId() {
 
 const chatId = ref(localStorage.getItem('chat_id') || generateChatId())
 
+const isMobileLandscape = ref(false)
+
+const isDesktopPortrait = ref(false)
 
 const inputText = ref("");
 const fileInput = ref(null);
@@ -31,6 +38,100 @@ let isAudioPlaying = ref(false); // 音訊播放狀態
 
 const isReversed = ref(false)
 
+const isPortrait = computed(() => route.query.o === 'p')
+
+const selectedCharacter = ref('人物1');
+
+function isMobileDevice() {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+}
+
+const checkOrientation = () => {
+  const isLandscape = window.innerWidth > window.innerHeight
+  const isPortrait = !isLandscape
+
+  // 解析網址參數（支援 #/? 格式）
+  const hashParams = new URLSearchParams(window.location.hash.split("?")[1])
+  const oParam = hashParams.get("o")
+  const userId = hashParams.get("userid") || "default1"
+
+  // 判斷是否為手機
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  const isMobileLandscapeNow = isMobile && isLandscape
+  const isMobilePortraitNow = isMobile && isPortrait
+
+  console.log("🧭 狀態偵測：", {
+    oParam,
+    isMobile,
+    isLandscape,
+    isMobileLandscapeNow,
+    isMobilePortraitNow,
+  })
+
+  // 桌機 or 筆電 + o=p 時提醒使用橫版連結
+  if (!isMobile && oParam === "p") {
+    isDesktopPortrait.value = !isMobile && oParam === 'p'
+    // Swal.fire({
+    //   title: "💻 建議使用橫向版頁面",
+    //   html: `
+    //     <p style="font-size:15px; color:#444; line-height:1.6; text-align:left;">
+    //       您目前正在使用 <b>桌機或筆電</b> 版本瀏覽。<br><br>
+    //       為了獲得更佳的畫面與互動體驗，<br>
+    //       建議您使用以下連結開啟橫向版頁面：<br><br>
+    //       <a href="https://cmm.ai/nfachat/#/?userid=${userId}&o=l"
+    //         style="color:#2563eb; text-decoration:underline; font-weight:500;">
+    //         👉 點我前往橫版頁面
+    //       </a>
+    //     </p>
+    //   `,
+    //   icon: "info",
+    //   confirmButtonText: "我知道了",
+    //   confirmButtonColor: "#2563eb",
+    //   allowOutsideClick: false,
+    //   allowEscapeKey: false,
+    //   backdrop: true,
+    // })
+    // return
+  }
+
+  // 手機直向 + o=l 時提醒橫放
+  if (isMobile && oParam === "l" && isPortrait) {
+    Swal.fire({
+      title: "📱 請橫放手機",
+      html: `
+        <p style="font-size:15px; color:#444; line-height:1.6;">
+          為了更好的觀看體驗，請將手機旋轉成橫向模式。<br>
+          若您的手機開啟了 <b>直向鎖定</b>，請先將其關閉。
+        </p>
+      `,
+      icon: "info",
+      confirmButtonText: "我知道了",
+      confirmButtonColor: "#2563eb",
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+      backdrop: true,
+    })
+    return
+  }
+
+  // 其他情況不顯示彈窗
+  Swal.close()
+}
+
+const userId = computed(() => route.query.userid)
+
+console.log(userId.value);
+
+
+// onMounted(() => {
+//   checkOrientation()
+//   window.addEventListener('resize', checkOrientation)
+// })
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', checkOrientation)
+})
+
 watch(chatId, (newVal) => {
   localStorage.setItem('chat_id', newVal)
 })
@@ -46,9 +147,10 @@ const cohatDataTitle = ref([]);
 const hisMessages = []
 
 const fetchChatHistory = async () => {
+
   try {
-    const res = await axios.get('https://cmm.ai:8066/history?chat_id=all')
-    console.log('取得歷史紀錄：', res.data.data)
+    const res = await axios.get(`https://cmm.ai:8066/history?user_id=${userId.value}&chat_id=all`)
+    console.log('取得歷史紀錄：', res.data)
     chatData.value = res.data;
     console.log('取得歷史紀錄陣列：', chatData.value)
 
@@ -82,7 +184,20 @@ const fetchChatHistory = async () => {
 
     console.log(transformedChats)
 
-    conversations.value=transformedChats;
+    conversations.value = transformedChats;
+
+    conversations.value.unshift({
+      chat_id: generateChatId(),
+      title: "New Chat",
+      messages: [
+        {
+          author: "bot",
+          label: "text",
+          answer: "您好，這裡是消防署災害統計小助手，您可以詢問例如：「2023年哪個月份高山症最多？」或「近兩年哪個縣市迷路最多？」請問您想查詢什麼呢？",
+        }
+
+      ]
+    });
 
   } catch (err) {
     console.error('錯誤：', err)
@@ -98,8 +213,8 @@ function selectConversation(index) {
 
 
   activeConversationIndex.value = index;
-  console.log('chatid',chatId.value,conversations.value[activeConversationIndex.value])
-  chatId.value=conversations.value[activeConversationIndex.value].chat_id;
+  console.log('chatid', chatId.value, conversations.value[activeConversationIndex.value])
+  chatId.value = conversations.value[activeConversationIndex.value].chat_id;
 
 
   console.log(activeConversationIndex.value)
@@ -112,6 +227,8 @@ function startNewConversation() {
     messages: []
   });
   activeConversationIndex.value = conversations.value.length - 1;
+
+  console.log('載入完', conversations.values)
 }
 
 let video = ref(null);
@@ -119,12 +236,42 @@ let video = ref(null);
 const videoSpeakSources = ref([]); // 動嘴型影片
 const videoSources = ref([]); // 開場白影片(中)
 
+// videoSources.value = ["https://cmm.ai/itri_rescue/Q2/mute.mp4"];
+
+// videoSpeakSources.value = ["https://cmm.ai/itri_rescue/Q2/speak_s.mp4"];
+
+
+
 const loadVideoSources = async () => {
   videoSources.value = ["https://cmm.ai/itri_rescue/cache_Q/mute.mp4"];
+
   videoSpeakSources.value = ["https://cmm.ai/itri_rescue/cache_Q/speak_s.mp4"];
 
 };
 
+
+// 🔁 當人物切換時，更新 videoSources & videoSpeakSources
+watch(selectedCharacter, (newVal) => {
+  if (newVal === '人物1') {
+    videoSources.value = ["https://cmm.ai/itri_rescue/cache_Q/mute.mp4"];
+    videoSpeakSources.value = ["https://cmm.ai/itri_rescue/cache_Q/speak_s.mp4"];
+    videoSrc.value = videoSources.value;
+    console.log(videoSrc.value)
+    videoPlay();
+
+  } else if (newVal === '人物2') {
+    videoSources.value = ["https://cmm.ai/itri_rescue/Q2/mute.mp4"];
+    videoSpeakSources.value = ["https://cmm.ai/itri_rescue/Q2/speak_s.mp4"];
+    videoSrc.value = videoSources.value;
+
+    console.log(newVal)
+    console.log(videoSrc.value)
+
+    videoPlay();
+
+
+  }
+});
 
 
 videoSpeakSources.value = [
@@ -137,80 +284,12 @@ const videoSrc = ref('');
 
 const conversations = ref([
   {
-    title: "New Chat假資料",
+    title: "New Chat",
     messages: []
-  },
-  {
-    title: "2024 年迷路的案件數量最多的三個縣市假資料",
-    messages: [
-      {
-        author: "user",
-        label: "text",
-        text: "2024 年迷路的案件數量最多的三個縣市"
-      },
-      {
-        author: "bot",
-        label: "text",
-        answer: "2024 年迷路的案件數量最多的三個縣市分別是新北市（71 件）、新竹縣（25 件）和臺中市（25 件）。",
-        table: `<table border="1" class="dataframe">
-          <thead><tr><th>city</th><th>cases</th></tr></thead>
-          <tbody>
-            <tr><td>新北市</td><td>71</td></tr>
-            <tr><td>新竹縣</td><td>25</td></tr>
-            <tr><td>臺中市</td><td>25</td></tr>
-          </tbody>
-        </table>`
-      }
-    ]
-  },
-  {
-    title: "112 年和113年全台迷路案件假資料",
-    messages: [
-      {
-        author: "user",
-        label: "text",
-        text: "112 年和113年全台迷路案件"
-      },
-      {
-        author: "bot",
-        label: "text",
-        answer: "112年和113年全台迷路案件數量分別為170件，兩年案件數量相同。",
-        table: `<table border="1" class="dataframe">
-          <thead><tr><th>year</th><th>total_cases</th></tr></thead>
-          <tbody>
-            <tr><td>112</td><td>170</td></tr>
-            <tr><td>113</td><td>170</td></tr>
-          </tbody>
-        </table>`
-      }
-    ]
-  },
-  {
-    title: "2024年救災前五大原因假資料",
-    messages: [
-      {
-        author: "user",
-        label: "text",
-        text: "2024年救災前五大原因"
-      },
-      {
-        author: "bot",
-        label: "text",
-        answer: "2024年救災的前五大原因依序為：迷路（170件）、創傷（63件）、墜谷（40件）、疾病（31件）及疲勞（25件）。",
-        table: `<table border="1" class="dataframe">
-          <thead><tr><th>reason</th><th>total_cases</th></tr></thead>
-          <tbody>
-            <tr><td>迷路</td><td>170</td></tr>
-            <tr><td>創傷</td><td>63</td></tr>
-            <tr><td>墜谷</td><td>40</td></tr>
-            <tr><td>疾病</td><td>31</td></tr>
-            <tr><td>疲勞</td><td>25</td></tr>
-          </tbody>
-        </table>`
-      }
-    ]
-  },
+  }
 ]);
+
+
 
 const isMuted = ref(true) // 一開始是靜音
 
@@ -238,9 +317,13 @@ const clearFile = () => {
 
 
 
+
+
 onMounted(() => {
   fetchChatHistory()
   loadVideoSources();
+  checkOrientation()
+  window.addEventListener('resize', checkOrientation)
   videoSrc.value = videoSources.value;
   videoPlay();
   // 偵測是否為桌機模式
@@ -251,16 +334,18 @@ onMounted(() => {
     // else showSidebar.value = false;
   };
 
-  console.log(conversations.value, activeConversationIndex.value)
+  console.log('當前對話', conversations.value,)
+  console.log(' activeConversationIndex.value', conversations.value)
 
-  setTimeout(() => {
-    conversations.value[activeConversationIndex.value].messages.push({
-      author: "bot",
-      label: "text",
-      answer: "您好，這裡是消防署災害統計小助手，您可以詢問例如：「2023年哪個月份高山症最多？」或「近兩年哪個縣市迷路最多？」請問您想查詢什麼呢？",
 
-    });
-  }, 500);
+  // setTimeout(() => {
+  //   conversations.value[activeConversationIndex.value].messages.push({
+  //     author: "bot",
+  //     label: "text",
+  //     answer: "您好，這裡是消防署災害統計小助手，您可以詢問例如：「2023年哪個月份高山症最多？」或「近兩年哪個縣市迷路最多？」請問您想查詢什麼呢？",
+
+  //   });
+  // }, 500);
 
   update();
   window.addEventListener('resize', update);
@@ -304,7 +389,7 @@ const handleEnter = async () => {
   messageinput = inputText.value;
   inputText.value = "";
   // 可以在這裡模擬一個 bot 回覆
-  let url = `https://cmm.ai:8066/ask?question=${messageinput}&chat_id=${chatId.value}`;
+  let url = `https://cmm.ai:8066/ask?question=${messageinput}&chat_id=${chatId.value}&user_id=${userId.value}`;
   console.log(url)
   try {
     const response = await axios.post(url);
@@ -319,8 +404,13 @@ const handleEnter = async () => {
         }
         video.loop = false;
         isMuted.value = false;
-        console.log('有cache')
-        videoSrc.value = response.data.mp4_url;
+        // 根據目前人物切換來源，決定用 mp4_url 還是 mp4_url2
+        if (selectedCharacter.value === '人物1') {
+          videoSrc.value = response.data.mp4_url;
+        } else if (selectedCharacter.value === '人物2') {
+          console.log(selectedCharacter.value)
+          videoSrc.value = `https://cmm.ai/itri_rescue/Q2/` + response.data.mp4_url2;
+        }
         videoPlay();
 
 
@@ -384,14 +474,44 @@ const toggleSidebar = () => {
   showSidebar.value = !showSidebar.value;
 };
 
+// let recognition
+
+// if ('webkitSpeechRecognition' in window) {
+//   const SpeechRecognition = window.webkitSpeechRecognition
+//   recognition = new SpeechRecognition()
+//   recognition.continuous = false
+//   recognition.lang = 'zh-TW' // 或 en-US
+//   recognition.interimResults = false
+
+//   recognition.onstart = () => {
+//     isListening.value = true
+//   }
+
+//   recognition.onend = () => {
+//     isListening.value = false
+//   }
+
+//   recognition.onresult = (event) => {
+//     const transcript = event.results[0][0].transcript
+//     inputText.value += transcript
+//     handleEnter()
+//   }
+// } else {
+//   console.warn('這個瀏覽器不支援語音辨識')
+// }
+
+// function startListening() {
+//   if (!recognition) return
+//   recognition.start()
+// }
 let recognition
 
 if ('webkitSpeechRecognition' in window) {
   const SpeechRecognition = window.webkitSpeechRecognition
   recognition = new SpeechRecognition()
   recognition.continuous = false
-  recognition.lang = 'zh-TW' // 或 en-US
-  recognition.interimResults = false
+  recognition.lang = 'zh-TW'
+  recognition.interimResults = true // ✅ 開啟即時辨識
 
   recognition.onstart = () => {
     isListening.value = true
@@ -402,8 +522,25 @@ if ('webkitSpeechRecognition' in window) {
   }
 
   recognition.onresult = (event) => {
-    const transcript = event.results[0][0].transcript
-    inputText.value += transcript
+    let interimTranscript = ''
+    let finalTranscript = ''
+
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      const transcript = event.results[i][0].transcript
+      if (event.results[i].isFinal) {
+        finalTranscript += transcript
+      } else {
+        interimTranscript += transcript
+      }
+    }
+
+    // 顯示暫時文字（即時顯示辨識中內容）
+    inputText.value = finalTranscript + interimTranscript
+
+    // 如果已經是最終結果 → 呼叫 handleEnter()
+    if (finalTranscript) {
+      handleEnter()
+    }
   }
 } else {
   console.warn('這個瀏覽器不支援語音辨識')
@@ -496,12 +633,75 @@ const onAudioPause = () => {
 
 };
 
+
+
+onMounted(() => {
+  window.addEventListener("resize", checkOrientation)
+})
+
+onUnmounted(() => {
+  window.removeEventListener("resize", checkOrientation)
+})
+
 function videoPlay() {
   if (video.value) {
     video.value.load();
     video.value.play();
   }
 }
+
+// AI 主播影片播放 & 暫停
+function togglePause(val) {
+  if (val === "pause") {
+    // video.value.pause();
+    isVideoPause.value = false;
+
+    if (video.value) {
+      video.value.pause();
+    }
+    if (currentAudio.value) {
+      currentAudio.value.pause(); // 暫停音訊
+    }
+  } else {
+    isVideoPause.value = true;
+
+    if (video.value) {
+      video.value.play();
+    }
+
+    if (currentAudio.value) {
+      currentAudio.value.play(); // 播放音訊
+      currentAudio.value.addEventListener("ended", onAudioEnded);
+    }
+  }
+}
+
+const playbackSpeed = ref('1')
+
+function updatePlaybackRate() {
+  if (video.value) {
+    const rate = parseFloat(playbackSpeed.value)
+    video.value.pause()            // 先暫停
+    video.value.currentTime = 0    // 回到開頭（如果你希望從頭開始播）
+    video.value.playbackRate = rate
+    video.value.play()             // 重新播放
+  }
+}
+
+function bindVideoEvents() {
+  if (video.value) {
+    video.value.addEventListener("loadedmetadata", () => {
+      updatePlaybackRate()
+    })
+  }
+}
+
+// 偵測 video 元素變化（切換影片 src 後 video 會 reload）
+watch(video, () => {
+  bindVideoEvents()
+})
+
+
 </script>
 
 <template>
@@ -514,18 +714,20 @@ function videoPlay() {
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
     </svg>
   </button>
-  <button @click="toggleLayout"
-    class="absolute top-4 right-4 z-50 bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded shadow">
+  <button @click="toggleLayout" v-if="!isPortrait"
+    class="hidden md:flex fixed top-10 left-1/2 z-50 transform -translate-x-1/2 -translate-y-1/2 bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded shadow">
     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"
       class="size-6">
       <path stroke-linecap="round" stroke-linejoin="round"
         d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
     </svg>
-
   </button>
   <audio v-if="audioURL" :src="audioURL" controls></audio>
   <!-- 外層容器，左右分欄 -->
-  <div class="flex h-screen">
+  <div class="flex h-screen transition-all duration-300" :class="{
+    'w-full': !isDesktopPortrait,    // 其他情況維持滿版
+    'w-2/5 mx-auto': isDesktopPortrait, // 桌機 + o=p 時 50% 並置中
+  }">
     <div v-if="!isVideoMode || showSidebar"
       class="fixed top-0 left-0 h-screen w-64 bg-[#345678] flex flex-col text-white z-40 transition-transform duration-300"
       :style="{ display: isVideoMode && !showSidebar ? 'none' : 'flex' }">
@@ -549,20 +751,54 @@ function videoPlay() {
         </button>
       </div>
     </div>
-    <div :class="['flex w-full flex-col md:flex-row h-screen', isReversed ? 'md:flex-row-reverse' : 'md:flex-row']">
+    <div :class="[
+      'flex w-full h-screen',
+      isPortrait ? 'flex-col' : (isReversed ? 'flex-row-reverse' : 'flex-row')
+    ]">
       <!-- 左側：虛擬人影片區 -->
-      <div class="w-full md:w-1/2 h-1/2 md:h-full flex items-center justify-center bg-[#F5F5F5]">
+      <div :class="[
+        isPortrait ? 'h-1/2 w-full' : 'h-full w-1/2',
+        'bg-gray-100 flex items-center justify-center bg-[#F5F5F5] relative'
+      ]">
         <!-- 可放 iframe / video tag / canvas -->
         <!-- <video src="" autoplay muted loop class="w-full h-full object-cover"></video> -->
-        <video ref="video" preload playsinline autoplay :muted="isMuted" @ended="onVideoEnded"
-          class="w-[65%] h-[100%] mx-auto object-cover">
+        <video ref="video" preload playsinline autoplay :muted="isMuted" @ended="onVideoEnded" :class="[
+          'mx-auto object-cover transition-all duration-300',
+          isMobileLandscape ? 'h-[90%]' : 'h-[100%]',
+          isDesktopPortrait ? 'w-[40%]' : 'w-[65%]'
+        ]">
           <source :src="videoSrc" type="video/mp4" />
         </video>
+        <button v-if="isVideoPause" @click="togglePause('pause')" class="control-btn bg-[#345678]"
+          :class="isDesktopPortrait ? 'right-[50px]' : 'right-[150px]'">
+          <img src="../assets/img/pause-button.png" alt="" />
+        </button>
+
+        <button v-else @click="togglePause('play')" class="control-btn bg-[#345678]"
+          :class="isDesktopPortrait ? 'right-[50px]' : 'right-[150px]'">
+          <img src="../assets/img/play-button.png" alt="" />
+        </button>
+        <div class="absolute left-4 bottom-4 bg-[#345678] text-white rounded px-2 py-1 text-sm z-10">
+          <select v-model="playbackSpeed" @change="updatePlaybackRate" class="bg-transparent text-white border-none outline-none appearance-none
+           [&>option]:text-black [&>option]:bg-white">
+            <!-- <option value="0.6">更慢</option> -->
+            <option value="0.75">慢</option>
+            <option value="1">一般</option>
+            <option value="1.25">快</option>
+          </select>
+        </div>
+        <div class="absolute right-4 bottom-4 bg-[#345678] text-white rounded px-2 py-1 text-sm z-10">
+          <select v-model="selectedCharacter" class="bg-transparent text-white border-none outline-none appearance-none
+           [&>option]:text-black [&>option]:bg-white">
+            <option value="人物1">人物1</option>
+            <option value="人物2">人物2</option>
+          </select>
+        </div>
       </div>
 
       <!-- 右側：表格與對話區 -->
-      <div class="w-full md:w-1/2 h-1/2 md:h-full flex flex-col  md:pt-0 bg-white min-h-0"
-        :class="{ 'md:ml-8': isReversed }">
+      <div
+        :class="[isReversed ? 'md:ml-8' : '', isPortrait ? 'h-1/2 w-full' : 'h-full w-1/2', 'flex flex-col  md:pt-0 bg-white min-h-0']">
         <!-- 對話與表格內容 -->
         <div v-if="inConversation" ref="chatArea" class="flex-1 overflow-y-auto p-4 space-y-6 h-auto">
           <div v-for="(msg, idx) in currentMessages" :key="idx" class="space-y-2">
@@ -572,8 +808,10 @@ function videoPlay() {
               animate__fadeInRight: msg.author === 'user',
               animate__fadeInLeft: msg.author !== 'user'
             }">
-              <div class="max-w-[90%] sm:max-w-[70%] px-5 py-3"
-                :class="{ 'bg-main text-white shadow-lg rounded-full': msg.author === 'user' }">
+              <div class="px-5 py-3 transition-all duration-300" :class="[
+                msg.author === 'user' && 'bg-main text-white shadow-lg rounded-full',
+                isMobileLandscape ? 'max-w-[100%]' : 'max-w-[90%] sm:max-w-[70%]'
+              ]">
                 <div v-if="msg.text">
                   <p v-html="msg.text"></p>
                 </div>
@@ -611,7 +849,7 @@ function videoPlay() {
 
           <input ref="fileInput" type="file" accept="image/*" @change="handleFileChange" class="hidden" />
           <button @click="triggerFileInput" class="text-gray-600 hover:text-blue-500">
-            <PaperClipIcon class="w-6 h-6" />
+            <!-- <PaperClipIcon class="w-6 h-6" /> -->
           </button>
         </div>
       </div>
@@ -659,5 +897,47 @@ th {
   // background: #fff;
   // color: black;
 
+}
+
+.control-btn {
+  width: 33px;
+  height: 33px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  z-index: 50;
+  top: 23px;
+  // right: 150px;
+  cursor: pointer;
+  border: none;
+  border-radius: 100px;
+
+  img {
+    width: 25px;
+    filter: invert(100%) sepia(0%) saturate(0%) hue-rotate(93deg) brightness(103%) contrast(103%);
+  }
+
+  @media (max-width: 768px) {
+    top: 16px;
+    right: 16px;
+  }
+
+  @media (max-width: 1080px) and (aspect-ratio: 9/16) {
+    width: 66px;
+    height: 66px;
+    top: 23px;
+    right: 50px;
+
+    img {
+      width: 50px;
+    }
+  }
+}
+
+@media screen and (max-aspect-ratio: 1/1) {
+  .portrait-stack {
+    flex-direction: column !important;
+  }
 }
 </style>

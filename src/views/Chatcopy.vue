@@ -253,6 +253,7 @@ if ('webkitSpeechRecognition' in window) {
   recognition.onresult = (event) => {
     const transcript = event.results[0][0].transcript
     inputText.value += transcript
+    handleEnter();
   }
 } else {
   console.warn('這個瀏覽器不支援語音辨識')
